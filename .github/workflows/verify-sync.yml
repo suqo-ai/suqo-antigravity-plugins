@@ -56,6 +56,13 @@ jobs:
           ref: ${{ steps.pinned.outputs.sha }}
           path: claude-plugins
 
+      # Unlike acplugin (pinned to an exact version everywhere it's used),
+      # this always installs whatever the official installer currently
+      # calls latest — confirmed there's no supported way to pin a specific
+      # agy version: the installer's manifest URL is hardcoded, no version
+      # argument or env var overrides it. Accepted, not fixed: if a future
+      # agy release changes what `plugin import` produces, this check could
+      # start failing for reasons unrelated to any actual PR content.
       - name: Install the Antigravity CLI
         run: curl -fsSL https://antigravity.google/cli/install.sh | bash
 
