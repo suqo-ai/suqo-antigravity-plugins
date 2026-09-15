@@ -2,14 +2,19 @@ name: Verify Antigravity sync
 
 # One check on every PR to main: does what's committed at the repo root
 # (plugin.json, skills/) actually match what the official Antigravity
-# CLI's Claude importer produces from suqo-claude-plugins at the commit
-# recorded in .source-sync?
+# CLI's Claude importer (plus our one-line rename step) produces from
+# suqo-claude-plugins at the commit recorded in .source-sync?
 #
-# No reconcile-script tests here, unlike suqo-codex-plugins and
+# Mostly no reconcile-script tests here, unlike suqo-codex-plugins and
 # suqo-cursor-plugins - this port doesn't use acplugin or any custom
-# script we wrote. `agy plugin import` (the official, first-party
-# importer) does the whole job correctly by itself, so there's no custom
-# logic of ours to unit-test.
+# conversion logic we wrote. `agy plugin import` (the official, first-party
+# importer) does the whole job correctly by itself. The one exception:
+# `agy plugin import` always names the plugin after the source
+# (suqo-claude-plugins) with no rename flag of its own (confirmed via
+# `agy plugin --help` - import takes only a positional source path), so
+# tools/rename-plugin-manifest.mjs exists purely to fix that in the
+# pipeline instead of by hand-editing the committed plugin.json - its
+# tests do run here.
 #
 # `agy plugin import` and `agy plugin validate` don't require being
 # logged into a Google account (only live prompt queries do), so this
@@ -34,8 +39,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-rename-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run rename script tests
+        run: node --test tools/*.test.mjs
+
   verify-in-sync-with-source:
     runs-on: ubuntu-latest
+    needs: test-rename-script
     steps:
       - name: Checkout suqo-antigravity-plugins (this repo, the PR's branch)
         uses: actions/checkout@v4
@@ -66,10 +82,28 @@ jobs:
       - name: Install the Antigravity CLI
         run: curl -fsSL https://antigravity.google/cli/install.sh | bash
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Import the plugin with the official importer
         run: |
           AGY="$HOME/.local/bin/agy"
           "$AGY" plugin import "$GITHUB_WORKSPACE/claude-plugins"
+
+      # agy plugin import always names the plugin after the source
+      # (suqo-claude-plugins) - renamed here, in the pipeline, so it can't
+      # get silently reverted by a future run. See tools/rename-plugin-
+      # manifest.mjs's doc comment for why this step exists at all.
+      - name: Rename the plugin to suqo-antigravity-plugins
+        run: |
+          node antigravity-plugins/tools/rename-plugin-manifest.mjs \
+            "$HOME/.gemini/config/plugins/suqo-claude-plugins/plugin.json" \
+            suqo-antigravity-plugins
+
+      - name: Validate the renamed plugin
+        run: |
+          AGY="$HOME/.local/bin/agy"
           "$AGY" plugin validate "$HOME/.gemini/config/plugins/suqo-claude-plugins"
 
       - name: Diff the import output against what's actually committed
