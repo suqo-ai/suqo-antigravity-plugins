@@ -1,0 +1,80 @@
+name: Verify Antigravity sync
+
+# One check on every PR to main: does what's committed at the repo root
+# (plugin.json, skills/) actually match what the official Antigravity
+# CLI's Claude importer produces from suqo-claude-plugins at the commit
+# recorded in .source-sync?
+#
+# No reconcile-script tests here, unlike suqo-codex-plugins and
+# suqo-cursor-plugins - this port doesn't use acplugin or any custom
+# script we wrote. `agy plugin import` (the official, first-party
+# importer) does the whole job correctly by itself, so there's no custom
+# logic of ours to unit-test.
+#
+# `agy plugin import` and `agy plugin validate` don't require being
+# logged into a Google account (only live prompt queries do), so this
+# runs with no credentials stored in CI at all.
+#
+# Pinned to .source-sync's recorded SHA, not suqo-claude-plugins' live
+# main, same reasoning as the other two repos' verify-sync.yml: an
+# unrelated PR here shouldn't go red just because upstream moved. That
+# question is check-source-drift.yml's job instead, on a schedule,
+# opening an issue rather than blocking anything.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-sync-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-in-sync-with-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout suqo-antigravity-plugins (this repo, the PR's branch)
+        uses: actions/checkout@v4
+        with:
+          path: antigravity-plugins
+
+      - name: Read the pinned source SHA
+        id: pinned
+        run: echo "sha=$(cat antigravity-plugins/.source-sync)" >> "$GITHUB_OUTPUT"
+
+      # No token: — relies on suqo-claude-plugins staying public. If that
+      # changes, this step starts failing with an auth error that won't
+      # obviously point back to this line.
+      - name: Checkout suqo-claude-plugins at the pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: suqo-ai/suqo-claude-plugins
+          ref: ${{ steps.pinned.outputs.sha }}
+          path: claude-plugins
+
+      - name: Install the Antigravity CLI
+        run: curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+      - name: Import the plugin with the official importer
+        run: |
+          AGY="$HOME/.local/bin/agy"
+          "$AGY" plugin import "$GITHUB_WORKSPACE/claude-plugins"
+          "$AGY" plugin validate "$HOME/.gemini/config/plugins/suqo-claude-plugins"
+
+      - name: Diff the import output against what's actually committed
+        run: |
+          set -e
+          staged="$HOME/.gemini/config/plugins/suqo-claude-plugins"
+          if ! diff -q "$staged/plugin.json" antigravity-plugins/plugin.json; then
+            echo "::error::plugin.json in this PR does not match what 'agy plugin import' produces from suqo-claude-plugins@${{ steps.pinned.outputs.sha }} (the SHA recorded in .source-sync). Re-import and commit the result - if you're intentionally syncing to a newer source commit, update .source-sync to that SHA too."
+            exit 1
+          fi
+          if ! diff -rq "$staged/skills" antigravity-plugins/skills; then
+            echo "::error::skills/ in this PR does not match what 'agy plugin import' produces from suqo-claude-plugins@${{ steps.pinned.outputs.sha }}. Re-import and commit the result."
+            exit 1
+          fi
+          echo "In sync with suqo-ai/suqo-claude-plugins@${{ steps.pinned.outputs.sha }}."
