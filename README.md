@@ -105,6 +105,8 @@ node tools/rename-plugin-manifest.mjs \
 
 `--source` merges `homepage`/`license`/`keywords` in from the real source manifest (rewriting the old repo name to this one wherever it appears in `homepage`). `--description` is a deliberate override, not a copy from source — the source's own wording is exactly what this fixes. Both flags are optional and only apply on top of what's already there; a bare rename still works exactly as before.
 
+> **Note:** the `--description` text above is copied from `.github/workflows/verify-sync.yml` — that workflow is the canonical copy (CI actually runs it); this one is for humans re-syncing by hand and isn't checked against it automatically, so if it ever changes there, update it here too.
+
 The importer copies the source tree wholesale into `~/.gemini/config/plugins/suqo-claude-plugins/`. Copy only `plugin.json` and `skills/` from there into this repo — `.git/`, `.claude/`, `.claude-plugin/`, `LICENSE` and `README.md` are either Claude-specific or redundant with this repo's own. Then verify with a real `agy plugin install` and update `.source-sync` to the commit you imported from.
 
 > **Note:** `agy` has no supported way to pin a version — the installer's manifest URL is hardcoded, with no version argument or env override. CI therefore always runs whatever the installer currently calls latest, unlike the Codex/Cursor ports which pin their converter exactly. If a future `agy` release changes what `plugin import` produces, the sync check can go red for reasons unrelated to any PR's content.
