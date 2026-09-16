@@ -1,20 +1,23 @@
 name: Verify Antigravity sync
 
-# One check on every PR to main: does what's committed at the repo root
-# (plugin.json, skills/) actually match what the official Antigravity
-# CLI's Claude importer (plus our one-line rename step) produces from
-# suqo-claude-plugins at the commit recorded in .source-sync?
+# One check on every PR to main (and on every direct push to main - see
+# below): does what's committed at the repo root (plugin.json, skills/)
+# actually match what the official Antigravity CLI's Claude importer
+# (plus our rename/reconcile step) produces from suqo-claude-plugins at
+# the commit recorded in .source-sync?
 #
 # Mostly no reconcile-script tests here, unlike suqo-codex-plugins and
 # suqo-cursor-plugins - this port doesn't use acplugin or any custom
 # conversion logic we wrote. `agy plugin import` (the official, first-party
-# importer) does the whole job correctly by itself. The one exception:
-# `agy plugin import` always names the plugin after the source
-# (suqo-claude-plugins) with no rename flag of its own (confirmed via
-# `agy plugin --help` - import takes only a positional source path), so
-# tools/rename-plugin-manifest.mjs exists purely to fix that in the
-# pipeline instead of by hand-editing the committed plugin.json - its
-# tests do run here.
+# importer) does the whole job correctly by itself, with two exceptions,
+# both confirmed by reading its real output, not assumed:
+# `agy plugin import` always names the plugin after the source with no
+# rename flag of its own, and it silently drops homepage/license/keywords
+# and carries over the source's own "Claude skills..." description
+# (agy plugin validate accepts all of those fields fine - this is lost
+# metadata, not a schema limitation). tools/rename-plugin-manifest.mjs
+# fixes both, in the pipeline instead of by hand-editing the committed
+# plugin.json - its tests run here.
 #
 # `agy plugin import` and `agy plugin validate` don't require being
 # logged into a Google account (only live prompt queries do), so this
@@ -25,9 +28,19 @@ name: Verify Antigravity sync
 # unrelated PR here shouldn't go red just because upstream moved. That
 # question is check-source-drift.yml's job instead, on a schedule,
 # opening an issue rather than blocking anything.
+#
+# push: branches: [main] - added after a real gap: this workflow used to
+# run on pull_request only, so a commit pushed straight to main (as one
+# was, hand-fixing exactly the description bug this workflow's rename
+# step now fixes properly) never got checked at all. Direct pushes to
+# main should be rare, but when they happen they need the same check a PR
+# gets - branch protection requiring PRs would be the more complete fix,
+# but isn't something this workflow file can enforce on its own.
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch: {}
 
@@ -91,15 +104,19 @@ jobs:
           AGY="$HOME/.local/bin/agy"
           "$AGY" plugin import "$GITHUB_WORKSPACE/claude-plugins"
 
-      # agy plugin import always names the plugin after the source
-      # (suqo-claude-plugins) - renamed here, in the pipeline, so it can't
-      # get silently reverted by a future run. See tools/rename-plugin-
-      # manifest.mjs's doc comment for why this step exists at all.
-      - name: Rename the plugin to suqo-antigravity-plugins
+      # agy plugin import always names the plugin after the source and
+      # drops homepage/license/keywords while keeping the source's own
+      # "Claude skills..." description - all fixed here, in the pipeline,
+      # so none of it can get silently reverted by a future run (including
+      # a direct push to main, now that this workflow runs on push too).
+      # See tools/rename-plugin-manifest.mjs's doc comment for why.
+      - name: Rename and reconcile the plugin manifest
         run: |
           node antigravity-plugins/tools/rename-plugin-manifest.mjs \
             "$HOME/.gemini/config/plugins/suqo-claude-plugins/plugin.json" \
-            suqo-antigravity-plugins
+            suqo-antigravity-plugins \
+            --source claude-plugins/.claude-plugin/plugin.json \
+            --description "Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs."
 
       - name: Validate the renamed plugin
         run: |
