@@ -56,9 +56,90 @@ test('is a no-op (but still normalizes the trailing newline) when the name alrea
 
     const { stdout } = runScript(SCRIPT, [manifestPath, 'suqo-antigravity-plugins']);
 
-    assert.match(stdout, /no change needed/);
+    assert.match(stdout, /No fields needed reconciling/);
     const result = readJson(manifestPath);
     assert.equal(result.name, 'suqo-antigravity-plugins');
+  } finally {
+    cleanup();
+  }
+});
+
+test('--description overrides the description unconditionally', () => {
+  const { dir, cleanup } = makeTempDir('rename-plugin-');
+  try {
+    const manifestPath = join(dir, 'plugin.json');
+    writeJson(manifestPath, {
+      name: 'suqo-claude-plugins',
+      description: 'Claude skills for building apps with the SUQO SDKs.',
+    });
+
+    runScript(SCRIPT, [
+      manifestPath, 'suqo-antigravity-plugins',
+      '--description', 'Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs.',
+    ]);
+    const result = readJson(manifestPath);
+
+    assert.equal(result.description, 'Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs.');
+  } finally {
+    cleanup();
+  }
+});
+
+test('without --description, the source wording is left exactly as agy imported it', () => {
+  const { dir, cleanup } = makeTempDir('rename-plugin-');
+  try {
+    const manifestPath = join(dir, 'plugin.json');
+    writeJson(manifestPath, {
+      name: 'suqo-claude-plugins',
+      description: 'Claude skills for building apps with the SUQO SDKs.',
+    });
+
+    runScript(SCRIPT, [manifestPath, 'suqo-antigravity-plugins']);
+    const result = readJson(manifestPath);
+
+    assert.equal(result.description, 'Claude skills for building apps with the SUQO SDKs.');
+  } finally {
+    cleanup();
+  }
+});
+
+test('--source merges homepage/license/keywords when the target is missing them, rewriting the old name in homepage', () => {
+  const { dir, cleanup } = makeTempDir('rename-plugin-');
+  try {
+    const manifestPath = join(dir, 'plugin.json');
+    const sourcePath = join(dir, 'source-plugin.json');
+
+    writeJson(manifestPath, { name: 'suqo-claude-plugins', description: 'x' });
+    writeJson(sourcePath, {
+      name: 'suqo-claude-plugins',
+      homepage: 'https://github.com/suqo-ai/suqo-claude-plugins',
+      license: 'Apache-2.0',
+      keywords: ['suqo', 'sdk'],
+    });
+
+    runScript(SCRIPT, [manifestPath, 'suqo-antigravity-plugins', '--source', sourcePath]);
+    const result = readJson(manifestPath);
+
+    assert.equal(result.homepage, 'https://github.com/suqo-ai/suqo-antigravity-plugins');
+    assert.equal(result.license, 'Apache-2.0');
+    assert.deepEqual(result.keywords, ['suqo', 'sdk']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('without --source, homepage/license/keywords are left absent (matching what agy actually produces)', () => {
+  const { dir, cleanup } = makeTempDir('rename-plugin-');
+  try {
+    const manifestPath = join(dir, 'plugin.json');
+    writeJson(manifestPath, { name: 'suqo-claude-plugins', description: 'x' });
+
+    runScript(SCRIPT, [manifestPath, 'suqo-antigravity-plugins']);
+    const result = readJson(manifestPath);
+
+    assert.equal(result.homepage, undefined);
+    assert.equal(result.license, undefined);
+    assert.equal(result.keywords, undefined);
   } finally {
     cleanup();
   }

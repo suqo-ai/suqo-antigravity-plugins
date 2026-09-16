@@ -1,6 +1,17 @@
 {
   "author": "SUQO AI",
-  "description": "Antigravity skills for building apps with the SUQO SDKs (PHP and TypeScript).",
+  "description": "Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs.",
   "name": "suqo-antigravity-plugins",
-  "version": "0.4.0"
+  "version": "0.4.0",
+  "homepage": "https://github.com/suqo-ai/suqo-antigravity-plugins",
+  "license": "Apache-2.0",
+  "keywords": [
+    "suqo",
+    "sdk",
+    "php",
+    "typescript",
+    "subscriptions",
+    "payments",
+    "webhooks"
+  ]
 }

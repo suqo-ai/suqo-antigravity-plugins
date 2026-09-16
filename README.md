@@ -84,7 +84,7 @@ suqo-antigravity-plugins/
 Unlike the [Codex](https://github.com/suqo-ai/suqo-codex-plugins) and [Cursor](https://github.com/suqo-ai/suqo-cursor-plugins) ports, this repo runs no third-party converter and no manifest-reconciling scripts of its own. Antigravity's official importer does the whole job:
 
 1. **`agy plugin import`** (first-party) reads the source `.claude-plugin/plugin.json` and copies `skills/` verbatim. Claude's `SKILL.md` / `references/` / `templates/` layout already matches Antigravity's own `skills/` format, so no restructuring is needed.
-2. **`tools/rename-plugin-manifest.mjs`** is the one step of our own. `agy plugin import` always names the imported plugin after its source (`suqo-claude-plugins`) and offers no rename flag, so this renames it to match this repo's identity — in the pipeline, rather than by hand-editing the committed manifest.
+2. **`tools/rename-plugin-manifest.mjs`** is the one step of our own, run right after import. `agy plugin import` has two real gaps, confirmed against its actual output rather than assumed: it always names the imported plugin after its source (`suqo-claude-plugins`), with no rename flag of its own, and it silently drops `homepage`/`license`/`keywords` while keeping the source's own `description` verbatim — which says "Claude skills..." (`agy plugin validate` accepts all three dropped fields fine, so this is lost metadata, not an Antigravity schema limit). This script fixes all of it in the pipeline, rather than by hand-editing the committed manifest — a hand-edit was tried once and silently reverted itself on the next regeneration.
 3. Every regeneration is verified with a real `agy plugin install` before being committed.
 
 ### CI
@@ -98,8 +98,12 @@ Unlike the [Codex](https://github.com/suqo-ai/suqo-codex-plugins) and [Cursor](h
 agy plugin import <path-to-suqo-claude-plugins>
 node tools/rename-plugin-manifest.mjs \
   ~/.gemini/config/plugins/suqo-claude-plugins/plugin.json \
-  suqo-antigravity-plugins
+  suqo-antigravity-plugins \
+  --source <path-to-suqo-claude-plugins>/.claude-plugin/plugin.json \
+  --description "Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs."
 ```
+
+`--source` merges `homepage`/`license`/`keywords` in from the real source manifest (rewriting the old repo name to this one wherever it appears in `homepage`). `--description` is a deliberate override, not a copy from source — the source's own wording is exactly what this fixes. Both flags are optional and only apply on top of what's already there; a bare rename still works exactly as before.
 
 The importer copies the source tree wholesale into `~/.gemini/config/plugins/suqo-claude-plugins/`. Copy only `plugin.json` and `skills/` from there into this repo — `.git/`, `.claude/`, `.claude-plugin/`, `LICENSE` and `README.md` are either Claude-specific or redundant with this repo's own. Then verify with a real `agy plugin install` and update `.source-sync` to the commit you imported from.
 
