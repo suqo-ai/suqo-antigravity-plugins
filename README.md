@@ -12,11 +12,10 @@ Requires the [Antigravity CLI](https://antigravity.google) (`agy`) installed fir
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 ```
 
-Then clone this repo and install it:
+Then install straight from GitHub — no clone needed:
 
 ```bash
-git clone https://github.com/suqo-ai/suqo-antigravity-plugins.git
-agy plugin install ./suqo-antigravity-plugins
+agy plugin install https://github.com/suqo-ai/suqo-antigravity-plugins
 ```
 
 That's it. Confirm it registered:
@@ -39,10 +38,19 @@ agy plugin list
 
 Once installed, Antigravity has the SUQO PHP and TypeScript SDK usage skills built in — correct method signatures, common pitfalls, and webhook-handling patterns, without needing to explain any of it per session.
 
+### Installing from a local clone
+
+Useful if you're changing the plugin and want to test before pushing:
+
+```bash
+git clone https://github.com/suqo-ai/suqo-antigravity-plugins.git
+agy plugin install ./suqo-antigravity-plugins
+```
+
 ### Other commands
 
 ```bash
-agy plugin validate ./suqo-antigravity-plugins   # check before installing
+agy plugin validate ./suqo-antigravity-plugins   # check a local copy before installing
 agy plugin uninstall suqo-antigravity-plugins    # remove
 ```
 
