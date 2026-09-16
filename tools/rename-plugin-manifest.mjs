@@ -40,6 +40,18 @@
  * <new-name> wherever it appears embedded in the URL - the same fix
  * already applied to suqo-codex-plugins/suqo-cursor-plugins.
  *
+ * The anchor for that rewrite is `source.name` - deliberately, not this
+ * script's own `manifest.name`. An earlier version read it from
+ * `manifest.name`, which had already become <new-name> after the first
+ * run; on a second run, the rewrite silently no-op'd (it was looking for
+ * the wrong string) while the plain source-copy above it kept
+ * unconditionally overwriting with the raw, unrenamed value - so the
+ * script converged on the wrong homepage and then reported itself clean.
+ * Found by review (the exact same class of bug reported and fixed on
+ * suqo-codex-plugins/suqo-cursor-plugins), reproduced, fixed:
+ * `source.name` never changes between runs, so this script is now a true
+ * no-op on a second run against its own output - see the idempotency test.
+ *
  * --description <text>: replaces `description` unconditionally with the
  * given text, regardless of what's currently there. Not a "fill a gap"
  * fix like --source's fields above - an explicit override, same shape as
@@ -52,21 +64,39 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const FIELDS_TO_RECONCILE = ['homepage', 'license', 'keywords'];
+const KNOWN_FLAGS = new Set(['--source', '--description']);
 
+// Strict on purpose - see the Codex/Cursor reconcile scripts' identical
+// rationale: a silently-ignored malformed flag defeats the whole point of
+// this living in the pipeline instead of being a hand-edit. Found by
+// review: `--source=x` / `--description=x`, a missing value, or a typo'd
+// flag name all used to fall through to being silently-ignored positional
+// arguments, exit code 0.
 function parseArgs(argv) {
   const positional = [];
-  let sourcePath;
-  let description;
+  const flags = {};
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--source') {
-      sourcePath = argv[++i];
-    } else if (argv[i] === '--description') {
-      description = argv[++i];
+    const arg = argv[i];
+    if (arg.startsWith('--')) {
+      if (arg.includes('=')) {
+        console.error(`Unsupported "--flag=value" syntax: "${arg}". Use "--flag value" (space-separated).`);
+        process.exit(1);
+      }
+      if (!KNOWN_FLAGS.has(arg)) {
+        console.error(`Unrecognized flag: "${arg}".`);
+        process.exit(1);
+      }
+      const value = argv[++i];
+      if (value === undefined || value.startsWith('--')) {
+        console.error(`Flag "${arg}" requires a value.`);
+        process.exit(1);
+      }
+      flags[arg] = value;
     } else {
-      positional.push(argv[i]);
+      positional.push(arg);
     }
   }
-  return { positional, sourcePath, description };
+  return { positional, sourcePath: flags['--source'], description: flags['--description'] };
 }
 
 function main() {
@@ -80,14 +110,15 @@ function main() {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const changed = [];
 
-  const oldName = manifest.name;
-  if (oldName !== newName) {
-    changed.push(`name: ${JSON.stringify(oldName)} -> ${JSON.stringify(newName)}`);
+  if (manifest.name !== newName) {
+    changed.push(`name: ${JSON.stringify(manifest.name)} -> ${JSON.stringify(newName)}`);
     manifest.name = newName;
   }
 
   if (sourcePath !== undefined) {
     const source = JSON.parse(readFileSync(sourcePath, 'utf8'));
+    // source.name, not manifest.name - see the doc comment above.
+    const oldName = source.name;
     const rename = (str) => (oldName && str.includes(oldName) ? str.split(oldName).join(newName) : str);
 
     for (const field of FIELDS_TO_RECONCILE) {
@@ -104,12 +135,18 @@ function main() {
     if (manifest.repository !== undefined) {
       if (typeof manifest.repository === 'string') {
         const before = manifest.repository;
-        manifest.repository = rename(before);
-        if (manifest.repository !== before) changed.push(`repository: ${JSON.stringify(before)} -> ${JSON.stringify(manifest.repository)}`);
+        const after = rename(before);
+        if (after !== before) {
+          manifest.repository = after;
+          changed.push(`repository: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        }
       } else if (typeof manifest.repository === 'object' && typeof manifest.repository.url === 'string') {
         const before = manifest.repository.url;
-        manifest.repository.url = rename(before);
-        if (manifest.repository.url !== before) changed.push(`repository.url: ${JSON.stringify(before)} -> ${JSON.stringify(manifest.repository.url)}`);
+        const after = rename(before);
+        if (after !== before) {
+          manifest.repository.url = after;
+          changed.push(`repository.url: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        }
       }
     }
   }

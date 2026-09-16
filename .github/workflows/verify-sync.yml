@@ -110,6 +110,12 @@ jobs:
       # so none of it can get silently reverted by a future run (including
       # a direct push to main, now that this workflow runs on push too).
       # See tools/rename-plugin-manifest.mjs's doc comment for why.
+      #
+      # This step's --description text is this repo's one canonical copy -
+      # README.md's manual re-sync section has to repeat it (a shell
+      # command in a code block can't `source` this workflow file), but
+      # keep the two in sync by hand if it ever changes here; a mismatch
+      # is silent (the README's copy is never executed by CI).
       - name: Rename and reconcile the plugin manifest
         run: |
           node antigravity-plugins/tools/rename-plugin-manifest.mjs \

@@ -41,9 +41,13 @@ jobs:
       # issue existed, so if the source drifted again while that issue
       # was still open, the "Live SHA" it recorded went stale - anyone
       # acting on the issue later would re-sync to the wrong commit.
-      # Editing the body (title kept as first-opened, for a stable link)
-      # every run keeps it accurate no matter how many weeks pass before
-      # someone re-syncs.
+      # Editing the body every run keeps it accurate no matter how many
+      # weeks pass before someone re-syncs. The title deliberately carries
+      # no SHAs (a second review round caught that an embedded-SHA title
+      # goes stale the same way the body used to - "has moved: abc -> def"
+      # while the refreshed body already says something else) - it's a
+      # stable pointer to "go read the body", not a record of any one
+      # drift event.
       - name: Open or refresh the drift issue
         if: steps.check.outputs.drifted == 'true'
         env:
@@ -62,12 +66,12 @@ jobs:
             echo "This issue is opened and kept up to date automatically by the weekly drift check (.github/workflows/check-source-drift.yml) - its body reflects the live SHA as of the most recent run, not necessarily the one from when it was first opened. It does not block any PR - verify-sync.yml stays pinned to the recorded SHA until a sync commit updates it."
           } > /tmp/drift-issue-body.md
 
-          existing=$(gh issue list --search "\"suqo-claude-plugins has moved\" in:title" --state open --json number --jq '.[0].number')
+          existing=$(gh issue list --search "\"suqo-claude-plugins has moved past .source-sync\" in:title" --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body-file /tmp/drift-issue-body.md
             echo "Refreshed issue #$existing with the current live SHA ($LIVE)."
           else
             gh issue create \
-              --title "suqo-claude-plugins has moved: $PINNED -> $LIVE" \
+              --title "suqo-claude-plugins has moved past .source-sync" \
               --body-file /tmp/drift-issue-body.md
           fi
