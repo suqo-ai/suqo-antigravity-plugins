@@ -124,20 +124,37 @@ jobs:
             --source claude-plugins/.claude-plugin/plugin.json \
             --description "Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs."
 
-      - name: Validate the renamed plugin
+      # `agy plugin import`'s raw output also has .git/, .claude/,
+      # .claude-plugin/, LICENSE, README.md in it - none of which are part
+      # of what's actually committed to this repo. Pruning into a separate
+      # directory and verifying *that* (not the raw import) is what
+      # confirms pruning itself didn't break something agy needs - checking
+      # the raw import only would let a bad prune ship undetected, since
+      # the thing verified wouldn't be the thing that ships.
+      - name: Prune into a clean directory - this is what actually ships
+        run: |
+          staged="$HOME/.gemini/config/plugins/suqo-claude-plugins"
+          pruned="$GITHUB_WORKSPACE/pruned"
+          rm -rf "$pruned"
+          mkdir -p "$pruned"
+          cp "$staged/plugin.json" "$pruned/"
+          cp -r "$staged/skills" "$pruned/"
+
+      - name: Validate and install the pruned plugin
         run: |
           AGY="$HOME/.local/bin/agy"
-          "$AGY" plugin validate "$HOME/.gemini/config/plugins/suqo-claude-plugins"
+          "$AGY" plugin validate "$GITHUB_WORKSPACE/pruned"
+          "$AGY" plugin install "$GITHUB_WORKSPACE/pruned"
 
-      - name: Diff the import output against what's actually committed
+      - name: Diff the pruned output against what's actually committed
         run: |
           set -e
-          staged="$HOME/.gemini/config/plugins/suqo-claude-plugins"
-          if ! diff -q "$staged/plugin.json" antigravity-plugins/plugin.json; then
+          pruned="$GITHUB_WORKSPACE/pruned"
+          if ! diff -q "$pruned/plugin.json" antigravity-plugins/plugin.json; then
             echo "::error::plugin.json in this PR does not match what 'agy plugin import' produces from suqo-claude-plugins@${{ steps.pinned.outputs.sha }} (the SHA recorded in .source-sync). Re-import and commit the result - if you're intentionally syncing to a newer source commit, update .source-sync to that SHA too."
             exit 1
           fi
-          if ! diff -rq "$staged/skills" antigravity-plugins/skills; then
+          if ! diff -rq "$pruned/skills" antigravity-plugins/skills; then
             echo "::error::skills/ in this PR does not match what 'agy plugin import' produces from suqo-claude-plugins@${{ steps.pinned.outputs.sha }}. Re-import and commit the result."
             exit 1
           fi
