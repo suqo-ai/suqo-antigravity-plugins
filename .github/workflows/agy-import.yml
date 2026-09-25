@@ -1,0 +1,142 @@
+name: Import via Antigravity CLI (CI-side)
+
+# Runs the one step of the sync procedure that the sync routine's own
+# sandboxed session cannot do itself: installing and running the real
+# `agy` CLI. That sandbox's egress proxy rejects `antigravity.google` and
+# the private Cloud Run URL its installer redirects to (confirmed by direct
+# testing, not assumed) - unlike `acplugin` (an npm package, used for the
+# Codex/Cursor ports), `agy` has no install path that goes through an
+# already-allowed host. GitHub Actions runners have no such restriction -
+# confirmed by verify-sync.yml's own real runs, which install and use the
+# same CLI successfully on every PR.
+#
+# This workflow does ONLY the conversion, not the full sync. It does not
+# commit, push, or open a PR - `permissions: contents: read`, same as
+# verify-sync.yml's own scope (check-source-drift.yml separately has
+# `issues: write` for its own narrow purpose, but nothing in this repo has
+# ever been granted contents/pull-requests write; adding that here would
+# be a bigger, separate change this fix doesn't need). The routine that
+# triggers this
+# (workflow_dispatch, passing the exact source commit to import) downloads
+# this run's `antigravity-import` artifact afterward and does everything
+# else itself - diffing, committing, opening the PR - exactly as it
+# already does for the Codex and Cursor ports. See .sync/PROCEDURE.md in
+# suqo-claude-plugins (Antigravity section) for the full procedure this
+# is one step of.
+#
+# Steps reuse verify-sync.yml's install/import/rename/prune sequence
+# (not extracted into a shared composite action - a deliberate, smaller
+# choice than refactoring verify-sync.yml, which already works and wasn't
+# otherwise touched by this fix). This means the two files can drift if
+# one is edited without the other - confirmed already: this workflow's
+# own first draft dropped the `agy plugin install` step verify-sync.yml's
+# equivalent runs. That's not a functional gap (verify-sync.yml still runs
+# the real install-verification on the resulting PR), but if you change
+# the install/import/rename/prune steps here, check verify-sync.yml too,
+# and vice versa - nothing enforces the two staying in sync.
+#
+# run-name embeds source_sha so concurrent dispatches (e.g. two routine
+# sessions racing, which has already happened for real with this
+# project's other routines) can be told apart in `gh run list`'s
+# `displayTitle` field - `gh workflow run` returns no run id, and
+# run-list's own JSON has no field exposing a dispatch's inputs otherwise.
+run-name: "agy-import for suqo-claude-plugins@${{ inputs.source_sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Exact commit SHA in suqo-ai/suqo-claude-plugins to import from (not a branch name - the routine resolves main to its current SHA before dispatching, so this run stays reproducible even if main moves again before the artifact is picked up)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  agy-import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject a non-SHA source_sha input
+        env:
+          # Passed as an env var, not interpolated into the script below -
+          # splicing ${{ inputs.source_sha }} directly into a run: block is
+          # GitHub's own documented script-injection anti-pattern (a
+          # dispatch input crafted like `x" ]]; then :; fi; <cmd> #` would
+          # otherwise execute arbitrary shell on this runner). Confirmed by
+          # reproducing it against the direct-interpolation form during
+          # review; this form isn't vulnerable to it.
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if ! [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit SHA, not a branch name or short SHA (got: '$SOURCE_SHA'). actions/checkout accepts a branch name here silently, which would defeat this run's reproducibility guarantee - resolve it to an exact SHA before dispatching."
+            exit 1
+          fi
+
+      - name: Checkout suqo-antigravity-plugins (this repo, for tools/)
+        uses: actions/checkout@v4
+        with:
+          path: antigravity-plugins
+
+      # No token: - relies on suqo-claude-plugins staying public, same as
+      # verify-sync.yml.
+      - name: Checkout suqo-claude-plugins at the requested SHA
+        uses: actions/checkout@v4
+        with:
+          repository: suqo-ai/suqo-claude-plugins
+          ref: ${{ inputs.source_sha }}
+          path: claude-plugins
+
+      # Same caveat as verify-sync.yml: no supported way to pin a specific
+      # agy version, always installs whatever the official installer
+      # currently calls latest.
+      - name: Install the Antigravity CLI
+        run: curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Import the plugin with the official importer
+        run: |
+          AGY="$HOME/.local/bin/agy"
+          "$AGY" plugin import "$GITHUB_WORKSPACE/claude-plugins"
+
+      # Same fix verify-sync.yml already applies to every import - agy's
+      # own output always needs this correcting, not something specific to
+      # this workflow.
+      - name: Rename and reconcile the plugin manifest
+        run: |
+          node antigravity-plugins/tools/rename-plugin-manifest.mjs \
+            "$HOME/.gemini/config/plugins/suqo-claude-plugins/plugin.json" \
+            suqo-antigravity-plugins \
+            --source claude-plugins/.claude-plugin/plugin.json \
+            --description "Skills and SDK usage guides for building apps on top of the SUQO PHP and TypeScript SDKs."
+
+      # Same prune verify-sync.yml does - agy's raw output carries .git/,
+      # .claude/, .claude-plugin/, LICENSE, README.md that don't belong in
+      # what actually ships.
+      - name: Prune into a clean directory - this is what the routine picks up
+        run: |
+          staged="$HOME/.gemini/config/plugins/suqo-claude-plugins"
+          pruned="$GITHUB_WORKSPACE/pruned"
+          rm -rf "$pruned"
+          mkdir -p "$pruned"
+          cp "$staged/plugin.json" "$pruned/"
+          cp -r "$staged/skills" "$pruned/"
+
+      - name: Validate the pruned plugin before handing it off
+        run: |
+          AGY="$HOME/.local/bin/agy"
+          "$AGY" plugin validate "$GITHUB_WORKSPACE/pruned"
+
+      - name: Upload the pruned output for the routine to download
+        uses: actions/upload-artifact@v4
+        with:
+          name: antigravity-import
+          path: pruned/
+          # 1 day was too tight - a routine session paused for human review
+          # or picked back up after a delay could find its artifact already
+          # garbage-collected. 5 days balances that against not letting
+          # stale artifacts accumulate.
+          retention-days: 5
