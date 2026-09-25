@@ -11,10 +11,12 @@ name: Import via Antigravity CLI (CI-side)
 # same CLI successfully on every PR.
 #
 # This workflow does ONLY the conversion, not the full sync. It does not
-# commit, push, or open a PR - `permissions: contents: read` throughout,
-# matching every other workflow in this repo (none of them have ever been
-# granted write access; adding that here would be a bigger, separate
-# change this fix doesn't need). The routine that triggers this
+# commit, push, or open a PR - `permissions: contents: read`, same as
+# verify-sync.yml's own scope (check-source-drift.yml separately has
+# `issues: write` for its own narrow purpose, but nothing in this repo has
+# ever been granted contents/pull-requests write; adding that here would
+# be a bigger, separate change this fix doesn't need). The routine that
+# triggers this
 # (workflow_dispatch, passing the exact source commit to import) downloads
 # this run's `antigravity-import` artifact afterward and does everything
 # else itself - diffing, committing, opening the PR - exactly as it
@@ -22,10 +24,23 @@ name: Import via Antigravity CLI (CI-side)
 # suqo-claude-plugins (Antigravity section) for the full procedure this
 # is one step of.
 #
-# Steps mirror verify-sync.yml's install/import/rename/prune sequence
-# exactly, since that sequence is already proven correct by every real PR
-# check this repo runs - this workflow does not invent a second way to do
-# the same conversion.
+# Steps reuse verify-sync.yml's install/import/rename/prune sequence
+# (not extracted into a shared composite action - a deliberate, smaller
+# choice than refactoring verify-sync.yml, which already works and wasn't
+# otherwise touched by this fix). This means the two files can drift if
+# one is edited without the other - confirmed already: this workflow's
+# own first draft dropped the `agy plugin install` step verify-sync.yml's
+# equivalent runs. That's not a functional gap (verify-sync.yml still runs
+# the real install-verification on the resulting PR), but if you change
+# the install/import/rename/prune steps here, check verify-sync.yml too,
+# and vice versa - nothing enforces the two staying in sync.
+#
+# run-name embeds source_sha so concurrent dispatches (e.g. two routine
+# sessions racing, which has already happened for real with this
+# project's other routines) can be told apart in `gh run list`'s
+# `displayTitle` field - `gh workflow run` returns no run id, and
+# run-list's own JSON has no field exposing a dispatch's inputs otherwise.
+run-name: "agy-import for suqo-claude-plugins@${{ inputs.source_sha }}"
 
 on:
   workflow_dispatch:
@@ -42,6 +57,13 @@ jobs:
   agy-import:
     runs-on: ubuntu-latest
     steps:
+      - name: Reject a non-SHA source_sha input
+        run: |
+          if ! [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit SHA, not a branch name or short SHA (got: '${{ inputs.source_sha }}'). actions/checkout accepts a branch name here silently, which would defeat this run's reproducibility guarantee - resolve it to an exact SHA before dispatching."
+            exit 1
+          fi
+
       - name: Checkout suqo-antigravity-plugins (this repo, for tools/)
         uses: actions/checkout@v4
         with:
@@ -104,4 +126,8 @@ jobs:
         with:
           name: antigravity-import
           path: pruned/
-          retention-days: 1
+          # 1 day was too tight - a routine session paused for human review
+          # or picked back up after a delay could find its artifact already
+          # garbage-collected. 5 days balances that against not letting
+          # stale artifacts accumulate.
+          retention-days: 5
