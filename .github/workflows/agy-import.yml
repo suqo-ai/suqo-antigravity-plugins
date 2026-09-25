@@ -58,9 +58,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Reject a non-SHA source_sha input
+        env:
+          # Passed as an env var, not interpolated into the script below -
+          # splicing ${{ inputs.source_sha }} directly into a run: block is
+          # GitHub's own documented script-injection anti-pattern (a
+          # dispatch input crafted like `x" ]]; then :; fi; <cmd> #` would
+          # otherwise execute arbitrary shell on this runner). Confirmed by
+          # reproducing it against the direct-interpolation form during
+          # review; this form isn't vulnerable to it.
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          if ! [[ "${{ inputs.source_sha }}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::source_sha must be a full 40-character commit SHA, not a branch name or short SHA (got: '${{ inputs.source_sha }}'). actions/checkout accepts a branch name here silently, which would defeat this run's reproducibility guarantee - resolve it to an exact SHA before dispatching."
+          if ! [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit SHA, not a branch name or short SHA (got: '$SOURCE_SHA'). actions/checkout accepts a branch name here silently, which would defeat this run's reproducibility guarantee - resolve it to an exact SHA before dispatching."
             exit 1
           fi
 
