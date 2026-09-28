@@ -135,6 +135,17 @@ jobs:
         with:
           name: antigravity-import
           path: pruned/
+          # include-hidden-files defaults to false (confirmed in the
+          # action's own action.yml) - it would silently drop any dotfile
+          # under skills/ (e.g. .gitkeep) with only a warning, not a
+          # failure. Real, not hypothetical: skills/ts-sdk-usage had two
+          # .gitkeep files at the time this workflow was written (removed
+          # upstream in suqo-claude-plugins#18, since they were vestigial,
+          # but a future .prettierrc/.npmrc under skills/ would hit the
+          # exact same silent-drop and only surface two repos away, as a
+          # confusing verify-sync.yml failure with no clue pointing back
+          # here).
+          include-hidden-files: true
           # 1 day was too tight - a routine session paused for human review
           # or picked back up after a delay could find its artifact already
           # garbage-collected. 5 days balances that against not letting
